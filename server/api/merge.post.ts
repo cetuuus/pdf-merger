@@ -1,7 +1,8 @@
 import { PDFDocument } from 'pdf-lib'
 
 export default defineEventHandler(async (event) => {
-  // 1. Lecture des fichiers envoyés en multipart/form-data
+  const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20 Mo
+
   const formData = await readMultipartFormData(event)
 
   if (!formData || formData.length < 2) {
@@ -11,11 +12,9 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // 2. Création d'un nouveau document PDF vierge
   const mergedPdf = await PDFDocument.create()
 
   for (const file of formData) {
-    // Vérification basique du type MIME
     if (file.type !== 'application/pdf') {
       throw createError({
         statusCode: 400,
@@ -23,8 +22,15 @@ export default defineEventHandler(async (event) => {
       })
     }
 
+    // Vérification de la taille de chaque fichier côté serveur
+    if (file.data.length > MAX_FILE_SIZE) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: `Le fichier "${file.filename}" dépasse la taille maximale autorisée de 20 Mo.`
+      })
+    }
+
     try {
-      // Chargement du PDF courant et copie de toutes ses pages
       const pdfDoc = await PDFDocument.load(file.data)
       const copiedPages = await mergedPdf.copyPages(pdfDoc, pdfDoc.getPageIndices())
 
@@ -39,10 +45,8 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // 3. Sauvegarde du PDF fusionné sous forme de tableau d'octets (Uint8Array)
   const mergedPdfBytes = await mergedPdf.save()
 
-  // 4. Définition des en-têtes HTTP pour forcer le téléchargement/affichage du PDF
   setResponseHeaders(event, {
     'Content-Type': 'application/pdf',
     'Content-Disposition': 'attachment; filename="fusion.pdf"',

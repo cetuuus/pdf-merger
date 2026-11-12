@@ -4,23 +4,44 @@ const isMerging = ref(false)
 const errorMessage = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 
+// Limites de taille (en octets)
+const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20 Mo par fichier
+const MAX_TOTAL_SIZE = 50 * 1024 * 1024 // 50 Mo au total
+
 // Ajout des fichiers sélectionnés
 function handleFileSelect(event: Event) {
   errorMessage.value = null
   const target = event.target as HTMLInputElement
   if (!target.files) return
 
-  const newFiles = Array.from(target.files).filter(
-    file => file.type === 'application/pdf'
-  )
+  const newFiles = Array.from(target.files)
+  const validFiles: File[] = []
 
-  if (newFiles.length !== target.files.length) {
-    errorMessage.value = 'Seuls les fichiers PDF sont acceptés.'
+  for (const file of newFiles) {
+    if (file.type !== 'application/pdf') {
+      errorMessage.value = 'Seuls les fichiers PDF sont acceptés.'
+      continue
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      errorMessage.value = `Le fichier "${file.name}" dépasse la limite de 20 Mo.`
+      continue
+    }
+    validFiles.push(file)
   }
 
-  files.value.push(...newFiles)
+  // Vérification de la taille totale cumulée
+  const currentTotalSize = files.value.reduce((acc, f) => acc + f.size, 0)
+  const incomingSize = validFiles.reduce((acc, f) => acc + f.size, 0)
 
-  // Reset de l'input pour pouvoir sélectionner le même fichier deux fois si besoin
+  if (currentTotalSize + incomingSize > MAX_TOTAL_SIZE) {
+    errorMessage.value = 'La taille totale des fichiers dépasse la limite autorisée de 50 Mo.'
+    if (fileInput.value) fileInput.value.value = ''
+    return
+  }
+
+  files.value.push(...validFiles)
+
+  // Reset de l'input
   if (fileInput.value) {
     fileInput.value.value = ''
   }
@@ -28,6 +49,7 @@ function handleFileSelect(event: Event) {
 
 // Supprimer un fichier
 function removeFile(index: number) {
+  errorMessage.value = null
   files.value.splice(index, 1)
 }
 
@@ -56,14 +78,12 @@ async function mergePdfs() {
       formData.append('files', file)
     })
 
-    // Appel de l'API Nuxt en demandant un Blob en retour
     const blob = await $fetch<Blob>('/api/merge', {
       method: 'POST',
       body: formData,
       responseType: 'blob'
     })
 
-    // Création d'un lien temporaire pour déclencher le téléchargement
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -71,7 +91,6 @@ async function mergePdfs() {
     document.body.appendChild(link)
     link.click()
 
-    // Nettoyage
     link.remove()
     window.URL.revokeObjectURL(url)
   } catch (err: unknown) {
@@ -91,7 +110,7 @@ async function mergePdfs() {
           Fusionner des PDF
         </h1>
         <p class="text-sm text-slate-500 mt-1">
-          Sélectionnez vos fichiers, ordonnez-les et téléchargez le résultat.
+          Sélectionnez vos fichiers (Max 20Mo/fichier, 50Mo au total).
         </p>
       </div>
 
@@ -106,7 +125,7 @@ async function mergePdfs() {
               Cliquez pour ajouter des fichiers PDF
             </p>
             <p class="text-xs text-slate-400 mt-1">
-              Sélection multiple autorisée
+              PDF uniquement • Max 20 Mo par fichier
             </p>
           </div>
           <input
@@ -143,9 +162,14 @@ async function mergePdfs() {
             <span class="font-mono text-xs text-slate-400 w-4">
               {{ index + 1 }}.
             </span>
-            <span class="font-medium text-slate-700 truncate">
-              {{ file.name }}
-            </span>
+            <div class="truncate">
+              <p class="font-medium text-slate-700 truncate">
+                {{ file.name }}
+              </p>
+              <p class="text-xs text-slate-400">
+                {{ (file.size / (1024 * 1024)).toFixed(2) }} Mo
+              </p>
+            </div>
           </div>
 
           <div class="flex items-center space-x-1 shrink-0">
