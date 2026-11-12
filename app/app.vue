@@ -4,11 +4,22 @@ const isMerging = ref(false)
 const errorMessage = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 
+// État des options avancées
+const showOptions = ref(false)
+const mergeMode = ref<'sequential' | 'interleave'>('sequential')
+
 // Limites de taille (en octets)
 const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20 Mo par fichier
 const MAX_TOTAL_SIZE = 50 * 1024 * 1024 // 50 Mo au total
 
-// Ajout des fichiers sélectionnés
+// Surveillance du changement de mode pour vérifier immédiatement la règle des 3 fichiers
+watch(mergeMode, (newMode) => {
+  errorMessage.value = null
+  if (newMode === 'interleave' && files.value.length > 2) {
+    errorMessage.value = 'Le mode alterné (Recto-Verso) est limité à 2 fichiers maximum.'
+  }
+})
+
 function handleFileSelect(event: Event) {
   errorMessage.value = null
   const target = event.target as HTMLInputElement
@@ -29,7 +40,6 @@ function handleFileSelect(event: Event) {
     validFiles.push(file)
   }
 
-  // Vérification de la taille totale cumulée
   const currentTotalSize = files.value.reduce((acc, f) => acc + f.size, 0)
   const incomingSize = validFiles.reduce((acc, f) => acc + f.size, 0)
 
@@ -41,19 +51,24 @@ function handleFileSelect(event: Event) {
 
   files.value.push(...validFiles)
 
-  // Reset de l'input
-  if (fileInput.value) {
-    fileInput.value.value = ''
+  // Vérification de la contrainte si on est en mode interleave
+  if (mergeMode.value === 'interleave' && files.value.length > 2) {
+    errorMessage.value = 'Le mode alterné (Recto-Verso) n\'est pas possible avec 3 fichiers ou plus. Veuillez repasser en mode séquentiel ou retirer des fichiers.'
   }
+
+  if (fileInput.value) fileInput.value.value = ''
 }
 
-// Supprimer un fichier
 function removeFile(index: number) {
   errorMessage.value = null
   files.value.splice(index, 1)
+
+  // Retirer l'erreur si on redevient <= 2 fichiers en mode interleave
+  if (mergeMode.value === 'interleave' && files.value.length <= 2) {
+    errorMessage.value = null
+  }
 }
 
-// Déplacer un fichier vers le haut ou le bas
 function moveFile(index: number, direction: 'up' | 'down') {
   const newIndex = direction === 'up' ? index - 1 : index + 1
   if (newIndex < 0 || newIndex >= files.value.length) return
@@ -62,10 +77,15 @@ function moveFile(index: number, direction: 'up' | 'down') {
   files.value.splice(newIndex, 0, item)
 }
 
-// Envoi à l'API et téléchargement
 async function mergePdfs() {
   if (files.value.length < 2) {
     errorMessage.value = 'Ajoutez au moins 2 fichiers PDF pour les fusionner.'
+    return
+  }
+
+  // Double sécurité avant l'envoi
+  if (mergeMode.value === 'interleave' && files.value.length > 2) {
+    errorMessage.value = 'Le mode alterné (Recto-Verso) n\'est pas possible avec 3 fichiers ou plus.'
     return
   }
 
@@ -77,6 +97,7 @@ async function mergePdfs() {
     files.value.forEach((file) => {
       formData.append('files', file)
     })
+    formData.append('mode', mergeMode.value)
 
     const blob = await $fetch<Blob>('/api/merge', {
       method: 'POST',
@@ -110,7 +131,7 @@ async function mergePdfs() {
           Fusionner des PDF
         </h1>
         <p class="text-sm text-slate-500 mt-1">
-          Sélectionnez vos fichiers (Max 20Mo/fichier, 50Mo au total).
+          Sélectionnez vos fichiers, ordonnez-les et fusionnez.
         </p>
       </div>
 
@@ -138,6 +159,53 @@ async function mergePdfs() {
             @change="handleFileSelect"
           >
         </label>
+      </div>
+
+      <!-- Bouton pour afficher les options supplémentaires -->
+      <div class="mb-6">
+        <button
+          type="button"
+          class="inline-flex items-center text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-lg transition"
+          @click="showOptions = !showOptions"
+        >
+          <span class="mr-1.5">{{ showOptions ? '▼' : '▶' }}</span> Options avancées
+        </button>
+
+        <div
+          v-if="showOptions"
+          class="mt-3 p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3 text-sm animate-fadeIn"
+        >
+          <p class="font-medium text-slate-700 text-xs uppercase tracking-wide">
+            Mode de fusion
+          </p>
+          <div class="space-y-2">
+            <label class="flex items-start space-x-3 cursor-pointer">
+              <input
+                v-model="mergeMode"
+                type="radio"
+                value="sequential"
+                class="mt-0.5 text-slate-900 focus:ring-slate-500"
+              >
+              <div>
+                <span class="font-medium text-slate-800">Séquentiel (Standard)</span>
+                <p class="text-xs text-slate-500">Met les fichiers les uns à la suite des autres.</p>
+              </div>
+            </label>
+
+            <label class="flex items-start space-x-3 cursor-pointer">
+              <input
+                v-model="mergeMode"
+                type="radio"
+                value="interleave"
+                class="mt-0.5 text-slate-900 focus:ring-slate-500"
+              >
+              <div>
+                <span class="font-medium text-slate-800">Alterné / Recto-Verso (2 fichiers max)</span>
+                <p class="text-xs text-slate-500">Alterne les pages entre le Doc 1 (impairs) et le Doc 2 (pairs).</p>
+              </div>
+            </label>
+          </div>
+        </div>
       </div>
 
       <!-- Message d'erreur -->
@@ -206,7 +274,7 @@ async function mergePdfs() {
       <!-- Bouton d'action -->
       <button
         type="button"
-        :disabled="files.length < 2 || isMerging"
+        :disabled="files.length < 2 || isMerging || (mergeMode === 'interleave' && files.length > 2)"
         class="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition text-sm"
         @click="mergePdfs"
       >

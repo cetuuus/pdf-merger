@@ -1,12 +1,16 @@
 export default defineNuxtConfig({
-  compatibilityDate: '2025-02-20',
-  devtools: { enabled: true },
 
   modules: [
     '@nuxthub/core',
     '@nuxtjs/tailwindcss',
     '@nuxt/eslint'
   ],
+  devtools: { enabled: true },
+  compatibilityDate: '2025-02-20',
+
+  // Configuration NuxtHub (pas besoin de base de données ni de stockage R2 ici,
+  // tout se fait en mémoire vive dans le Worker Cloudflare)
+  hub: {},
 
   // Configuration d'ESLint pour un code propre
   eslint: {
@@ -18,9 +22,5 @@ export default defineNuxtConfig({
         commaDangle: 'never'
       }
     }
-  },
-
-  // Configuration NuxtHub (pas besoin de base de données ni de stockage R2 ici,
-  // tout se fait en mémoire vive dans le Worker Cloudflare)
-  hub: {}
+  }
 })
